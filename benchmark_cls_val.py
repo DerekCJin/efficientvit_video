@@ -171,8 +171,10 @@ def main():
         #print(f"seg_id_to_frames={seg_id_to_frames[s_id]}")
         img_dir = frames[0]
         df1 = df[df['narration_id']==s_id]
+
         vcls = df1['verb_class'].iloc[1]
         ncls = df1['noun_class'].iloc[1]
+
         actual_cls0 = str(vcls)+"_"+str(ncls)
 
         print(f"seg_id = {s_id}, vcls = {vcls}, ncls = {ncls}")
