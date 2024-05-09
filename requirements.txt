@@ -14,3 +14,14 @@ onnxsim
 onnxruntime
 git+https://github.com/alibaba/TinyNeuralNetwork.git
 git+https://github.com/facebookresearch/segment-anything.git
+
+pandas
+einops==0.6.0
+flash-attn==0.2.8
+kornia==0.6.10
+pandas==1.5.3
+pytorchvideo==0.1.5
+scikit-learn==1.2.2
+submitit==1.4.5
+transformers==4.26.1
+git+https://github.com/openai/CLIP.git

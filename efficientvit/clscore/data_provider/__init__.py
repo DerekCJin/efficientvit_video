@@ -3,3 +3,4 @@
 # International Conference on Computer Vision (ICCV), 2023
 
 from .imagenet import *
+from .ek100_cls import *

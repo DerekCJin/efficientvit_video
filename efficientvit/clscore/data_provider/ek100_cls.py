@@ -42,7 +42,7 @@ __all__ = ["EK100ClsDataProvider"]
 class EK100ClsDataProvider(DataProvider):
     name = "ek100_cls"
 
-    data_dir = "EK100_256p/videos"
+    data_dir = "EK100/EK100_320p_15sec_30fps_libx264/"
     n_classes = 1000
 
     _DEFAULT_RRC_CONFIG = {
