@@ -133,6 +133,30 @@ def get_args_parser():
 
 
 def main(args):
+    #model_mine = torch.load("logs_eff_b0b/checkpoint_best.pt", map_location='cpu') #
+    model_b1_r288 = torch.load("experiments/pretrain_lavila_vitb/b1-r288.pt", map_location='cpu')
+
+    print("b1-r288 state_dict:")
+    #time.sleep(10000)
+    for param_tensor in model_b1_r288['state_dict']:
+        print(param_tensor, "\t", model_b1_r288['state_dict'][param_tensor].size())
+    
+    state_dict_r288 = OrderedDict()
+    for k, v in model_b1_r288['state_dict'].items():
+        state_dict_r288[k.replace('module.', '')] = v
+
+    #state_dict_mine = OrderedDict()
+    #for k, v in model_mine['state_dict'].items():
+    #    state_dict_mine[k.replace('module.', '')] = v
+    
+    print("b1-r288 state_dict (replaced module with empty:)")
+    for param_tensor in state_dict_r288: #model_b1_r288.state_dict():
+        print(param_tensor, "\t", state_dict_r288[param_tensor].size())
+    
+    #print("\n\nnew model state_dict:")
+    #for param_tensor in state_dict_mine: #.state_dict():
+    #    print(param_tensor, "\t", state_dict_mine[param_tensor].size())
+    #time.sleep(100000)
     dist_utils.init_distributed_mode(args)
     dist_utils.random_seed(args.seed, dist_utils.get_rank())
 
@@ -141,13 +165,43 @@ def main(args):
     else:
         raise Exception('no checkpoint found, add it by `--pretrain-model ${CHECKPOINT_PATH}`')
     ckpt = torch.load(ckpt_path, map_location='cpu')
-    print(f"ckpt_path = {ckpt_path}, type of ckpt = {type(ckpt)}")
+    print(f"ckpt_path = {ckpt_path}")
+
+    print("******ckpt[state_dict], before replacing module with empty:")
+    for param_tensor in ckpt['state_dict']:
+        print(param_tensor, "\t", ckpt['state_dict'][param_tensor].size())
+
     state_dict = OrderedDict()
     for k, v in ckpt['state_dict'].items():
         state_dict[k.replace('module.', '')] = v
+    
+    print("*****ckpt[state_dict], replaced module with empty:")
+    for param_tensor in state_dict: 
+        print(param_tensor, "\t", state_dict[param_tensor].size())
 
+    #for k, v in model_b1_r288['state_dict'].items():
+    #    k = k.replace('backbone','visual')
+    #    k = k.replace('head','fc_cls')
+    #    state_dict[k]=v
+    
+    #print("After manually added b1_r288 keys")
+    #for param_tensor in state_dict: #model_b1_r288.state_dict():
+    #    print(param_tensor, "\t", state_dict[param_tensor].size())
+
+    #time.sleep(10000000)
     old_args = ckpt['args']
+    #print(f"old_args = {old_args}")
+    #print(f"type of old_args.model = {type(old_args.model)}, old_args.model = {old_args.model}")
+    #time.sleep(100000)
+    #old_args.model = "CLIP_VITB16"
+    
+    #params for EfficientViTBackbone, to add to CLIP so that EfficientViTBackbone net layers weights can be loaded in CLIP.load_state_dict()
+    width_list=[8, 16, 32, 64, 128],
+    depth_list=[1, 2, 2, 2, 2],
+    dim=16
+
     print("=> creating model: {}".format(old_args.model))
+    #print("=> creating model: {}".format('CLIP_VITB16'))
     model = getattr(model_clip, old_args.model)(
         freeze_temperature=True,
         use_grad_checkpointing=args.use_grad_checkpointing,
@@ -162,8 +216,11 @@ def main(args):
         project_embed_dim=old_args.project_embed_dim,
         pretrain_zoo=old_args.pretrain_zoo,
         pretrain_path=old_args.pretrain_path,
+        width_list=[8, 16, 32, 64, 128],
+        depth_list=[1, 2, 2, 2, 2],
+        dim=16,
     )
-    print(f"type of model_clip = {type(model_clip)}. type of model = {type(model)}, old_args.model = {old_args.model}, type of model.visual = {type(model.visual)}\n")
+    #time.sleep(1000000)
     model.logit_scale.requires_grad = False
     print('=> inflating PE in models due to different frame numbers')
     state_dict = inflate_positional_embeds(
@@ -171,30 +228,64 @@ def main(args):
         num_frames=args.clip_length,
         load_temporal_fix='bilinear',
     )
-    model.load_state_dict(state_dict, strict=True)
-    print("=> loaded resume checkpoint '{}' (epoch {})".format(ckpt_path, ckpt['epoch']))
+    print("\n*****state dict after inflate_positional_embeds()")
+    for param_tensor in state_dict: 
+        print(param_tensor, "\t", state_dict[param_tensor].size())
 
+
+    for k, v in model_b1_r288['state_dict'].items():
+        #k = k.replace('backbone','visual')
+        k = k.replace('backbone.','')
+        k = k.replace('head','fc_cls')
+        state_dict[k]=v
+
+    merged_state_dict_path = os.path.join(args.output_dir,"merged_state_dict.pt")
+    torch.save(state_dict, merged_state_dict_path)
+    merged_state_dict = torch.load(merged_state_dict_path)
+    print("****merged_state_dict:")
+    for param_tensor in merged_state_dict:
+        print(param_tensor, "\t", merged_state_dict[param_tensor].size())
+    model.load_state_dict(state_dict, strict=True)
+    #model.load_state_dict(new_state_dict, strict=False)
+    print(f"model type = {type(model)}")
+    # time.sleep(100000)
+    print("**** model_state_dict:")
+    #model.load_state_dict(new_state_dict)
+    model_state_dict = model.state_dict()
+    for param_tensor in model_state_dict:
+        print(param_tensor, "\t", model_state_dict[param_tensor].size())
+    #for key in list(model_state_dict.keys()):
+    #    new_key = key.replace('input_stem','visual.input_stem').replace('stages', 'visual.stages')
+    #    model_state_dict[new_key] = model_state_dict.pop(key)
+    print("******Calling model.load_state_dict(merged_state_dict, strict=True)")
+    model.load_state_dict(merged_state_dict, strict=True)
+    in_model_state_dict = model.state_dict()
+    print(f"*****After model.load_state_dict(), in_model_state_dict:")
+    for param_tensor in in_model_state_dict:
+        print(param_tensor, "\t", in_model_state_dict[param_tensor].size())
+    print("=> loaded resume checkpoint '{}' (epoch {})".format(ckpt_path, ckpt['epoch']))
+    time.sleep(10000)
     #new code
     get_args_parser()
     #args, opt = parser.parse_known_args()
     _, opt = parser.parse_known_args()
     kwargs = parse_unknown_args(opt)
 
-    effbb = effvit.EfficientViTBackbone(          
+    model.visual = effvit.EfficientViTBackbone(          
             width_list=[8, 16, 32, 64, 128],
             depth_list=[1, 2, 2, 2, 2],
             dim=16,
             **build_kwargs_from_config(kwargs, effvit.EfficientViTBackbone),
         ) 
+    #print(f"effbb = {effbb}")
     model = model_clip.VideoClassifier(
-    #    model.visual,
-        effbb,
+        model.visual,
         dropout=args.dropout_rate,
         num_classes=args.num_classes,
         **kwargs
     )
     model.cuda(args.gpu)
-    #model.cuda()
+    
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], bucket_cap_mb=200)
 
@@ -298,6 +389,7 @@ def main(args):
         raise ValueError('--norm-style should be in ["openai", "timm"]!')
 
     crop_size = 336 if old_args.model.endswith("_336PX") else 224
+    #crop_size = 224
 
     if args.fused_decode_crop:
         base_train_transform_ls = [
@@ -403,6 +495,7 @@ def main(args):
         if args.use_zero:
             print('consolidated on rank {} because of ZeRO'.format(args.rank))
             optimizer.consolidate_state_dict(0)
+        print(f"Before save_on_master, model = {model}\nstate_dict = {model.state_dict()}")
         dist_utils.save_on_master({
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
@@ -411,7 +504,7 @@ def main(args):
                 'best_acc1': best_acc1,
                 'args': args,
             }, is_best, args.output_dir)
-
+        print(f"After save_on_master, model = {model}\nstate_dict = {model.state_dict()}")
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in val_stats.items()},
                      'epoch': epoch}
@@ -470,7 +563,6 @@ def train(train_loader, transform_gpu, model, criterion, optimizer, scaler, epoc
 
         optimizer.zero_grad()
         tic = time.time()
-        print(f"********Right Before start hitting model with videos_mixed.\nmodel = {model}\nvideos_mixed = {videos_mixed.shape}, dtype of videos_mixed = {videos_mixed.dtype} ")
         # compute output
         with amp.autocast(enabled=not args.disable_amp):
             #with amp.autocast(enabled=True):
@@ -483,11 +575,12 @@ def train(train_loader, transform_gpu, model, criterion, optimizer, scaler, epoc
 
         if (data_iter + 1) % args.update_freq != 0:
             continue
-
+        #print(f"args.grad_clip_norm = {args.grad_clip_norm}")
         # compute gradient and do SGD step
         if args.grad_clip_norm is not None:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm, norm_type=2.0)
+            n = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm, norm_type=2.0)
+            #print(f"norm = {n}")
         scaler.step(optimizer)
         scaler.update()
         model.zero_grad(set_to_none=True)

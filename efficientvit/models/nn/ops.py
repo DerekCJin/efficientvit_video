@@ -51,9 +51,6 @@ class ConvLayer(nn.Module):
         
         padding = get_same_padding(kernel_size)
         padding *= dilation
-        #padding = 1
-        #padding = "valid"
-        #print(f"padding = {padding}")
         self.dropout = nn.Dropout3d(dropout, inplace=False) if dropout > 0 else None
         self.conv = nn.Conv3d(
             in_channels,
@@ -70,7 +67,6 @@ class ConvLayer(nn.Module):
         self.act = build_act(act_func)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBL******ConvLayer: {self._modules}")
         if self.dropout is not None:
             x = self.dropout(x)
         #if self.conv.weight.dtype != torch.float16:
@@ -79,9 +75,6 @@ class ConvLayer(nn.Module):
         self.conv.to('cuda:0')
         x.to('cuda:0')
         x = self.conv(x)
-        #x = x.type(torch.float32)
-        #print(f"2a ConvLayer.forward(): shape of input x = {x.shape}, x dtype = {x.dtype}")
-        #self.conv.weight = nn.Parameter(self.conv.weight.half())
         if self.norm:
             self.norm.to('cuda:0')
             x = self.norm(x)
@@ -106,7 +99,6 @@ class UpSampleLayer(nn.Module):
         self.align_corners = align_corners
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBL******UpSampleLayer: {self._modules}")
         if (self.size is not None and tuple(x.shape[-2:]) == self.size) or self.factor == 1:
             return x
         return resize(x, self.size, self.factor, self.mode, self.align_corners)
@@ -135,7 +127,6 @@ class LinearLayer(nn.Module):
         return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBL******LinearLayer: {self._modules}")
         x = self._try_squeeze(x)
         if self.dropout:
             x = self.dropout(x)
@@ -149,7 +140,6 @@ class LinearLayer(nn.Module):
 
 class IdentityLayer(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBL******IdentityLayer: {self._modules}")
         return x
 
 
@@ -195,7 +185,6 @@ class DSConv(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBB******DSConv: {self._modules}")
         x = self.depth_conv(x)
         x = self.point_conv(x)
         return x
@@ -250,7 +239,6 @@ class MBConv(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBB******MSConv: {self._modules}")
         x = self.inverted_conv(x)
         x = self.depth_conv(x)
         x = self.point_conv(x)
@@ -298,7 +286,6 @@ class FusedMBConv(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBB******FusedMBConv: {self._modules}")
         x = self.spatial_conv(x)
         x = self.point_conv(x)
         return x
@@ -344,7 +331,6 @@ class ResBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBB******ResBlock: {self._modules}")
         x = self.conv1(x)
         x = self.conv2(x)
         return x
@@ -429,7 +415,6 @@ class LiteMLA(nn.Module):
             ),
         )
         #qkv = torch.transpose(qkv, -1, -2)
-        #print(f"3 qkv shape = {qkv.shape}, after transpose()")
         q, k, v = (
             #qkv[..., 0 : self.dim],
             #qkv[..., self.dim : 2 * self.dim],
@@ -453,13 +438,11 @@ class LiteMLA(nn.Module):
            out = out.float()
         out = out[:, :, :-1] / (out[:, :, -1:] + self.eps)
         #out = torch.transpose(out, -1, -2)
-        #print(f"6 3rd out shape = {out.shape}, after transpose")
         out = torch.reshape(out, (B, -1, T, H, W))
         
         return out
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBB******LiteMLA: {self._modules}")
         # generate multi-scale q, k, v
         qkv = self.qkv(x)
         multi_scale_qkv = [qkv]
@@ -513,7 +496,6 @@ class EfficientViTBlock(nn.Module):
         self.local_module = ResidualBlock(local_module, IdentityLayer())
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nBB******EfficientViTBlock: {self._modules}")
         x = self.context_module(x)
         x = self.local_module(x)
         return x
@@ -546,7 +528,6 @@ class ResidualBlock(nn.Module):
             return self.main(self.pre_norm(x))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nFB******ResidualBlock: {self._modules}")
         if self.main is None:
             res = x
         elif self.shortcut is None:
@@ -554,7 +535,6 @@ class ResidualBlock(nn.Module):
         else:
             a = self.forward_main(x)
             b = self.shortcut(x)
-            #print(f"*****In ResidualBlock.forward(): size(a) = {a.size()}, size(b) = {b.size()}")
             res = self.forward_main(x) + self.shortcut(x)
             if self.post_act:
                 res = self.post_act(res)
@@ -583,7 +563,6 @@ class DAGBlock(nn.Module):
         self.output_ops = nn.ModuleList(list(outputs.values()))
 
     def forward(self, feature_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        print(f"\nFB******DAGBlock: {self._modules}")
         feat = [op(feature_dict[key]) for key, op in zip(self.input_keys, self.input_ops)]
         if self.merge == "add":
             feat = list_sum(feat)
@@ -608,8 +587,6 @@ class OpSequential(nn.Module):
                 valid_op_list.append(op)
         self.op_list = nn.ModuleList(valid_op_list)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"\nFB******OpSequential: {self._modules}")
-        #print(f"*****self.op_list = {self.op_list}")
         for op in self.op_list:
             x = op(x)
         return x

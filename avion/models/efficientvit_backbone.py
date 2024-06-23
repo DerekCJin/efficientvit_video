@@ -1,13 +1,11 @@
-# EfficientViT: Multi-Scale Linear Attention for High-Resolution Dense Prediction
-# Han Cai, Junyan Li, Muyan Hu, Chuang Gan, Song Han
 # International Conference on Computer Vision (ICCV), 2023
 
 import torch
 import torch.nn as nn
 
-import os
-import sys
-sys.path.append("/home/ubuntu/github/efficientvit_video/")
+#import os
+#import sys
+#sys.path.append("/home/ubuntu/github/efficientvit_video/")
 
 from efficientvit.models.nn import (
     ConvLayer,
@@ -72,7 +70,6 @@ class EfficientViTBackbone(nn.Module):
             self.input_stem.append(ResidualBlock(block, IdentityLayer()))
         in_channels = width_list[0]
         self.input_stem = OpSequential(self.input_stem)
-        print(f"EfficientViTBAckbone.self.input_stem = {self.input_stem}")
         self.width_list.append(in_channels)
         self.width = self.width_list[0]
         # stages
@@ -121,10 +118,8 @@ class EfficientViTBackbone(nn.Module):
                 )
             self.stages.append(OpSequential(stage))
             self.width_list.append(in_channels)
-        s = nn.ModuleList(self.stages)
-        print(f"EfficientViTBackbone.self.stages = {s}")
-        #self.stages = nn.ModuleList(self.stages)
-        s
+        #s = nn.ModuleList(self.stages)
+        self.stages = nn.ModuleList(self.stages)
 
     @staticmethod
     def build_local_block(
@@ -158,16 +153,11 @@ class EfficientViTBackbone(nn.Module):
         return block
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        print(f"****************In EfficientViTBackbone.forward(): shape of input x = {x.shape}, x.dtype = {x.dtype} ")
         output_dict = {"input": x}
         output_dict["stage0"] = x = self.input_stem(x)
-        print(f"shape of x after going through self.input_stem ({type(self.input_stem)}) = {x.shape}, x.dtype = {x.dtype}")
         for stage_id, stage in enumerate(self.stages, 1):
-            print(f"stage_id = {stage_id}, stage = {stage}, shape of input to stage {stage_id}  = {x.shape}, x.dtype = {x.dtype}")
             output_dict["stage%d" % stage_id] = x = stage(x)
-            print(f"stage_id = {stage_id}, shape of output from stage {stage_id} = {x.shape}, x.dtype = {x.dtype}")
         output_dict["stage_final"] = x
-        print(f"Final stage (stage {stage_id}, Shape of final x (output)  = {x.shape}, x.dtype = {x.dtype}")
         return output_dict
 
 
