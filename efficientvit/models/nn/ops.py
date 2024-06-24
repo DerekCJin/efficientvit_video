@@ -72,14 +72,10 @@ class ConvLayer(nn.Module):
         #if self.conv.weight.dtype != torch.float16:
             #self.conv.weight = nn.Parameter(torch.float16)
         d = next(self.conv.parameters()).device
-        self.conv.to('cuda:0')
-        x.to('cuda:0')
         x = self.conv(x)
         if self.norm:
-            self.norm.to('cuda:0')
             x = self.norm(x)
         if self.act:
-            self.act.to('cuda:0')
             x = self.act(x)
         #x = x.type(torch.FloatTensor)
         return x
@@ -447,7 +443,6 @@ class LiteMLA(nn.Module):
         qkv = self.qkv(x)
         multi_scale_qkv = [qkv]
         for op in self.aggreg:
-            op.to("cuda:0")
             multi_scale_qkv.append(op(qkv))
         multi_scale_qkv = torch.cat(multi_scale_qkv, dim=1)
         out = self.relu_linear_att(multi_scale_qkv)

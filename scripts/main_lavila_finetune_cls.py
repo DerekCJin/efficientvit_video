@@ -78,6 +78,7 @@ def get_args_parser():
     parser.add_argument('--dropout-rate', default=0.5, type=float, help='dropout for the last linear layer')
     parser.add_argument('--num-classes', default=3806, type=float, help='number of classes for the last linear layer')
     parser.add_argument('--pretrain-model', default='', type=str, help='path of pretrained model')
+    parser.add_argument('--use-imagenet-pretrain', action='store_true', help='use imagenet pretrain')
     parser.add_argument('--resume', default='', type=str, help='path to resume from')
     # mixup
     parser.add_argument('--mixup', type=float, default=0.8,
@@ -133,30 +134,28 @@ def get_args_parser():
 
 
 def main(args):
-    #model_mine = torch.load("logs_eff_b0b/checkpoint_best.pt", map_location='cpu') #
-    model_b1_r288 = torch.load("experiments/pretrain_lavila_vitb/b1-r288.pt", map_location='cpu')
-
-    print("b1-r288 state_dict:")
-    #time.sleep(10000)
-    for param_tensor in model_b1_r288['state_dict']:
-        print(param_tensor, "\t", model_b1_r288['state_dict'][param_tensor].size())
+    if args.use_imagenet_pretrain:
+        # See issue: https://github.com/mit-han-lab/efficientvit/issues/14
+        model_b0 = torch.load('./experiments/pretrain_lavila_vitb/b0-r224.pt', map_location='cpu')
+        
+        state_dict_head = OrderedDict()
+        state_dict_backbone = OrderedDict()
+        for k, v in model_b0['state_dict'].items():
+            if k.startswith('backbone'):
+                if v.ndim == 4:
+                    state_dict_backbone[k.replace('backbone.', '')] = v.unsqueeze(2).repeat(1, 1, v.shape[-1], 1, 1) / v.shape[-1]
+                else:
+                    state_dict_backbone[k.replace('backbone.', '')] = v
+            elif k.startswith('head'):
+                if v.ndim == 4:
+                    state_dict_head[k.replace('head.', '')] = v.unsqueeze(2).repeat(1, 1, v.shape[-1], 1, 1) / v.shape[-1]
+                elif k in ['head.op_list.3.linear.weight', 'head.op_list.3.linear.bias']:
+                    continue   # skip last linear layer
+                else:
+                    state_dict_head[k.replace('head.', '')] = v
+            else:
+                print(k)
     
-    state_dict_r288 = OrderedDict()
-    for k, v in model_b1_r288['state_dict'].items():
-        state_dict_r288[k.replace('module.', '')] = v
-
-    #state_dict_mine = OrderedDict()
-    #for k, v in model_mine['state_dict'].items():
-    #    state_dict_mine[k.replace('module.', '')] = v
-    
-    print("b1-r288 state_dict (replaced module with empty:)")
-    for param_tensor in state_dict_r288: #model_b1_r288.state_dict():
-        print(param_tensor, "\t", state_dict_r288[param_tensor].size())
-    
-    #print("\n\nnew model state_dict:")
-    #for param_tensor in state_dict_mine: #.state_dict():
-    #    print(param_tensor, "\t", state_dict_mine[param_tensor].size())
-    #time.sleep(100000)
     dist_utils.init_distributed_mode(args)
     dist_utils.random_seed(args.seed, dist_utils.get_rank())
 
@@ -167,41 +166,13 @@ def main(args):
     ckpt = torch.load(ckpt_path, map_location='cpu')
     print(f"ckpt_path = {ckpt_path}")
 
-    print("******ckpt[state_dict], before replacing module with empty:")
-    for param_tensor in ckpt['state_dict']:
-        print(param_tensor, "\t", ckpt['state_dict'][param_tensor].size())
-
     state_dict = OrderedDict()
     for k, v in ckpt['state_dict'].items():
         state_dict[k.replace('module.', '')] = v
     
-    print("*****ckpt[state_dict], replaced module with empty:")
-    for param_tensor in state_dict: 
-        print(param_tensor, "\t", state_dict[param_tensor].size())
-
-    #for k, v in model_b1_r288['state_dict'].items():
-    #    k = k.replace('backbone','visual')
-    #    k = k.replace('head','fc_cls')
-    #    state_dict[k]=v
-    
-    #print("After manually added b1_r288 keys")
-    #for param_tensor in state_dict: #model_b1_r288.state_dict():
-    #    print(param_tensor, "\t", state_dict[param_tensor].size())
-
-    #time.sleep(10000000)
     old_args = ckpt['args']
-    #print(f"old_args = {old_args}")
-    #print(f"type of old_args.model = {type(old_args.model)}, old_args.model = {old_args.model}")
-    #time.sleep(100000)
-    #old_args.model = "CLIP_VITB16"
     
-    #params for EfficientViTBackbone, to add to CLIP so that EfficientViTBackbone net layers weights can be loaded in CLIP.load_state_dict()
-    width_list=[8, 16, 32, 64, 128],
-    depth_list=[1, 2, 2, 2, 2],
-    dim=16
-
     print("=> creating model: {}".format(old_args.model))
-    #print("=> creating model: {}".format('CLIP_VITB16'))
     model = getattr(model_clip, old_args.model)(
         freeze_temperature=True,
         use_grad_checkpointing=args.use_grad_checkpointing,
@@ -220,7 +191,6 @@ def main(args):
         depth_list=[1, 2, 2, 2, 2],
         dim=16,
     )
-    #time.sleep(1000000)
     model.logit_scale.requires_grad = False
     print('=> inflating PE in models due to different frame numbers')
     state_dict = inflate_positional_embeds(
@@ -228,44 +198,7 @@ def main(args):
         num_frames=args.clip_length,
         load_temporal_fix='bilinear',
     )
-    print("\n*****state dict after inflate_positional_embeds()")
-    for param_tensor in state_dict: 
-        print(param_tensor, "\t", state_dict[param_tensor].size())
-
-
-    for k, v in model_b1_r288['state_dict'].items():
-        #k = k.replace('backbone','visual')
-        k = k.replace('backbone.','')
-        k = k.replace('head','fc_cls')
-        state_dict[k]=v
-
-    merged_state_dict_path = os.path.join(args.output_dir,"merged_state_dict.pt")
-    torch.save(state_dict, merged_state_dict_path)
-    merged_state_dict = torch.load(merged_state_dict_path)
-    print("****merged_state_dict:")
-    for param_tensor in merged_state_dict:
-        print(param_tensor, "\t", merged_state_dict[param_tensor].size())
     model.load_state_dict(state_dict, strict=True)
-    #model.load_state_dict(new_state_dict, strict=False)
-    print(f"model type = {type(model)}")
-    # time.sleep(100000)
-    print("**** model_state_dict:")
-    #model.load_state_dict(new_state_dict)
-    model_state_dict = model.state_dict()
-    for param_tensor in model_state_dict:
-        print(param_tensor, "\t", model_state_dict[param_tensor].size())
-    #for key in list(model_state_dict.keys()):
-    #    new_key = key.replace('input_stem','visual.input_stem').replace('stages', 'visual.stages')
-    #    model_state_dict[new_key] = model_state_dict.pop(key)
-    print("******Calling model.load_state_dict(merged_state_dict, strict=True)")
-    model.load_state_dict(merged_state_dict, strict=True)
-    in_model_state_dict = model.state_dict()
-    print(f"*****After model.load_state_dict(), in_model_state_dict:")
-    for param_tensor in in_model_state_dict:
-        print(param_tensor, "\t", in_model_state_dict[param_tensor].size())
-    print("=> loaded resume checkpoint '{}' (epoch {})".format(ckpt_path, ckpt['epoch']))
-    time.sleep(10000)
-    #new code
     get_args_parser()
     #args, opt = parser.parse_known_args()
     _, opt = parser.parse_known_args()
@@ -275,6 +208,9 @@ def main(args):
             width_list=[8, 16, 32, 64, 128],
             depth_list=[1, 2, 2, 2, 2],
             dim=16,
+            # width_list=[16, 32, 64, 128, 256],
+            # depth_list=[1, 2, 3, 3, 4],
+            # dim=16,
             **build_kwargs_from_config(kwargs, effvit.EfficientViTBackbone),
         ) 
     #print(f"effbb = {effbb}")
@@ -284,6 +220,9 @@ def main(args):
         num_classes=args.num_classes,
         **kwargs
     )
+    if args.use_pretrain:
+        model.visual.load_state_dict(state_dict_backbone)
+        model.fc_cls.load_state_dict(state_dict_head, strict=False)
     model.cuda(args.gpu)
     
     if args.distributed:
@@ -495,7 +434,7 @@ def main(args):
         if args.use_zero:
             print('consolidated on rank {} because of ZeRO'.format(args.rank))
             optimizer.consolidate_state_dict(0)
-        print(f"Before save_on_master, model = {model}\nstate_dict = {model.state_dict()}")
+        # print(f"Before save_on_master, model = {model}\nstate_dict = {model.state_dict()}")
         dist_utils.save_on_master({
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
